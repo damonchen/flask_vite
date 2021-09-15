@@ -17,11 +17,13 @@ class Vite(object):
     app.config.setdefault('VITE_DEV_SERVER_HOST', 'localhost')
     app.config.setdefault('VITE_DEV_SERVER_PORT', '3000')
     app.config.setdefault('VITE_WS_CLIENT_URL', '@vite/client')
+    app.config.setdefault('VITE_STATIC_ROOT', self.static_root)
+    app.config.setdefault('VITE_STATIC_URL', self.static_url)
 
     vite_assets_path = app.config.get('VITE_ASSETS_PATH')
 
     debug = app.config.get('DEBUG')
-    static_root = self.static_root
+    static_root = app.config.get('VITE_STATIC_ROOT')
     default_vite_manifest_path = _path.join(vite_assets_path if debug else static_root, 'manifest.json')
     app.config.setdefault('VITE_MANIFEST_PATH', default_vite_manifest_path)
 
@@ -34,6 +36,7 @@ class Vite(object):
         vite_url_for=self.vite_url_for,
         vite_asset_url=self.vite_asset_url,
         vite_asset=self.vite_asset,
+        vite_hmr_client=self.vite_hmr_client,
       )
 
     app.teardown_appcontext(self.teardown)
@@ -68,7 +71,7 @@ class Vite(object):
     vite_dev_server_protocol = self.app.config.get('VITE_DEV_SERVER_PROTOCOL')
     vite_dev_server_host = self.app.config.get('VITE_DEV_SERVER_HOST')
     vite_dev_server_port = self.app.config.get('VITE_DEV_SERVER_PORT')
-    static_url = self.static_url
+    static_url = self.app.config.get('VITE_STATIC_URL')
     path = path.lstrip('/')
 
     return urljoin(
@@ -79,16 +82,21 @@ class Vite(object):
 
   def _generate_script_tag(self, src, attrs):
     if attrs is not None:
-      print('attrs', attrs)
       attrs_str = ' '.join([f'{key}="{value}"' for key, value in attrs.items()])
     else:
       attrs_str = ''
 
     return f'<script {attrs_str} src="{src}"> </script>'
 
-  def _generate_stylesheet_tag(href):
+  def _generate_stylesheet_tag(self, href):
     return f'<link rel="stylesheet" href="{href}" />'
 
+  def generate_vite_ws_client(self):
+    if not self.app.config['VITE_DEV_MODE']:
+      return ""
+
+    ws_client_url = self._generate_vite_server_url(self.app.config['VITE_WS_CLIENT_URL'])
+    return self._generate_script_tag(ws_client_url, {'type': 'module'})
 
   def generate_vite_asset(self, path, script_attrs, with_imports):
     if self.app.config['VITE_DEV_MODE']:
@@ -105,11 +113,13 @@ class Vite(object):
     tags = []
     manifest_entry = self._manifest.get(path)
 
+    static_url = self.app.config['VITE_STATIC_URL']
+
     if 'css' in manifest_entry:
       for css_path in manifest_entry['css']:
         tags.append(
           self._generate_stylesheet_tag(
-            urljoin(self.static_url, css_path),
+            urljoin(static_url, css_path),
           )
         )
 
@@ -125,7 +135,7 @@ class Vite(object):
 
     tags.append(
       self._generate_script_tag(
-        urljoin(self.static_url, manifest_entry['file']),
+        urljoin(static_url, manifest_entry['file']),
         attrs=script_attrs,
       )
     )
@@ -164,3 +174,6 @@ class Vite(object):
   def vite_asset(self, path, script_attrs=None, with_imports=True):
     assert path is not None
     return Markup(self.generate_vite_asset(path, script_attrs=script_attrs, with_imports=with_imports))
+
+  def vite_hmr_client(self):
+    return Markup(self.generate_vite_ws_client())
